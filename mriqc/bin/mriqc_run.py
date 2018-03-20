@@ -12,11 +12,19 @@ from __future__ import print_function, division, absolute_import, unicode_litera
 
 import os
 import os.path as op
+import pandas as pd
 from multiprocessing import cpu_count
+from pkg_resources import resource_filename as pkgrf
+from ..classifier.helper import CVHelper
+from ..utils.misc import generate_csv  # , generate_pred
+from collections import OrderedDict
+import json
+
 
 from .. import __version__
 
 DEFAULT_MEM_GB = 8
+
 
 def get_parser():
     """Build parser object"""
@@ -231,13 +239,14 @@ def main():
     if 'participant' in analysis_levels:
         check_folder(settings['work_dir'])
 
-    check_folder(log_dir)
-    check_folder(settings['report_dir'])
+#    check_folder(log_dir)
+#    check_folder(settings['report_dir'])
 
     # Set nipype config
     ncfg.update_config({
-        'logging': {'log_directory': log_dir, 'log_to_file': True},
-        'execution': {'crashdump_dir': log_dir, 'crashfile_format': 'txt',
+#        'logging': {'log_directory': log_dir, 'log_to_file': True},
+        'execution': {#'crashdump_dir': log_dir, 
+                      'crashfile_format': 'txt',
                       'resource_monitor': opts.profile},
     })
 
@@ -343,6 +352,39 @@ def main():
 
         log.info('Participant level finished successfully.')
 
+
+        for mod in modalities:
+            print(mod)
+            dataframe, order = generate_csv(settings['output_dir'], mod)
+
+            # If there are no iqm.json files, nothing to do.
+            if dataframe is None:
+                log.warning(
+                    'No IQM-JSON files were found for the %s data type in %s. The group-level '
+                    'report was not generated.', mod, derivatives_dir)
+                continue
+
+            base_name = 'mclf_run-20170724-191452_mod-rfc_ver-0.9.7-rc8_class-2_cv-loso'
+            load_classifier = pkgrf(
+                'mriqc',
+                'data/mclf_run-20170724-191452_mod-rfc_ver-0.9.7-rc8_class-2_cv-'
+                'loso_data-all_estimator.pklz')
+
+            cvhelper = CVHelper(load_clf=load_classifier, n_jobs=-1,
+                                rate_label=['rater_1'], basename=base_name)
+            
+            prediction = cvhelper.predict(dataframe[order])
+            y_prob = prediction[0][0][1]
+            y_pred = prediction[1][0]
+           
+            with open('sub-park_T1w.json', 'r+') as json_file:
+                json_dict = json.load(json_file, object_pairs_hook=OrderedDict)
+                json_dict['y_prob'] = y_prob
+                json_dict['y_pred'] = y_pred
+                json.dump(json_dict, json_file)
+
+
+"""
     # Set up group level
     if 'group' in analysis_levels:
         from ..reports import group_html
@@ -386,7 +428,7 @@ def main():
             raise Exception("No data found. No group level reports were generated.")
 
         log.info('Group level finished successfully.')
-
+"""
 
 if __name__ == '__main__':
     main()
