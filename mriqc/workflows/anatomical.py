@@ -45,7 +45,7 @@ import os.path as op
 from niworkflows.nipype.pipeline import engine as pe
 from niworkflows.nipype.interfaces import io as nio
 from niworkflows.nipype.interfaces import utility as niu
-from niworkflows.nipype.interfaces import fsl, ants, afni
+from niworkflows.nipype.interfaces import fsl, ants
 from niworkflows.data import get_mni_icbm152_nlin_asym_09c
 from niworkflows.anat.skullstrip import afni_wf as skullstrip_wf
 from niworkflows.interfaces.registration import RobustMNINormalizationRPT as RobustMNINormalization
@@ -76,7 +76,7 @@ def anat_qc_workflow(dataset, settings, mod='T1w', name='anatMRIQC'):
 
     """
 
-    workflow = pe.Workflow(name=name+mod)
+    workflow = pe.Workflow(name="%s%s" % (name, mod))
     WFLOGGER.info('Building anatomical MRI QC workflow, datasets list: %s',
                   sorted([d.replace(settings['bids_dir'] + '/', '') for d in dataset]))
 
@@ -99,11 +99,11 @@ def anat_qc_workflow(dataset, settings, mod='T1w', name='anatMRIQC'):
     amw = airmsk_wf()
     # 6. Brain tissue segmentation
     segment = pe.Node(fsl.FAST(segments=True, out_basename='segment', img_type=int(mod[1])),
-                      name='segmentation', mem_gb=3)
+                      name='segmentation', mem_gb=5)
     # 7. Compute IQMs
     iqmswf = compute_iqms(settings, modality=mod)
-    # Reports
-    repwf = individual_reports(settings)
+#    # Reports
+#    repwf = individual_reports(settings)
 
     # Connect all nodes
     workflow.connect([
@@ -119,8 +119,8 @@ def anat_qc_workflow(dataset, settings, mod='T1w', name='anatMRIQC'):
             ('outputnode.inverse_composite_transform', 'inputnode.inverse_composite_transform')]),
         (norm, iqmswf, [
             ('outputnode.inverse_composite_transform', 'inputnode.inverse_composite_transform')]),
-        (norm, repwf, ([
-            ('outputnode.out_report', 'inputnode.mni_report')])),
+#        (norm, repwf, ([
+#            ('outputnode.out_report', 'inputnode.mni_report')])),
         (to_ras, amw, [('out_file', 'inputnode.in_file')]),
         (asw, amw, [('outputnode.out_mask', 'inputnode.in_mask')]),
         (hmsk, amw, [('outputnode.out_file', 'inputnode.head_mask')]),
@@ -134,16 +134,16 @@ def anat_qc_workflow(dataset, settings, mod='T1w', name='anatMRIQC'):
         (segment, iqmswf, [('tissue_class_map', 'inputnode.segmentation'),
                            ('partial_volume_files', 'inputnode.pvms')]),
         (hmsk, iqmswf, [('outputnode.out_file', 'inputnode.headmask')]),
-        (to_ras, repwf, [('out_file', 'inputnode.in_ras')]),
-        (asw, repwf, [('outputnode.bias_corrected', 'inputnode.inu_corrected'),
-                      ('outputnode.out_mask', 'inputnode.brainmask')]),
-        (hmsk, repwf, [('outputnode.out_file', 'inputnode.headmask')]),
-        (amw, repwf, [('outputnode.out_file', 'inputnode.airmask'),
-                      ('outputnode.artifact_msk', 'inputnode.artmask'),
-                      ('outputnode.rot_mask', 'inputnode.rotmask')]),
-        (segment, repwf, [('tissue_class_map', 'inputnode.segmentation')]),
-        (iqmswf, repwf, [('outputnode.out_noisefit', 'inputnode.noisefit')]),
-        (iqmswf, repwf, [('outputnode.out_file', 'inputnode.in_iqms')]),
+#        (to_ras, repwf, [('out_file', 'inputnode.in_ras')]),
+#        (asw, repwf, [('outputnode.bias_corrected', 'inputnode.inu_corrected'),
+#                      ('outputnode.out_mask', 'inputnode.brainmask')]),
+#        (hmsk, repwf, [('outputnode.out_file', 'inputnode.headmask')]),
+#        (amw, repwf, [('outputnode.out_file', 'inputnode.airmask'),
+#                      ('outputnode.artifact_msk', 'inputnode.artmask'),
+#                      ('outputnode.rot_mask', 'inputnode.rotmask')]),
+#        (segment, repwf, [('tissue_class_map', 'inputnode.segmentation')]),
+#        (iqmswf, repwf, [('outputnode.out_noisefit', 'inputnode.noisefit')]),
+#        (iqmswf, repwf, [('outputnode.out_file', 'inputnode.in_iqms')]),
         (iqmswf, outputnode, [('outputnode.out_file', 'out_json')])
     ])
 
@@ -163,6 +163,7 @@ def anat_qc_workflow(dataset, settings, mod='T1w', name='anatMRIQC'):
         ])
 
     return workflow
+
 
 def spatial_normalization(settings, mod='T1w', name='SpatialNormalization',
                           resolution=2.0):
@@ -192,13 +193,13 @@ def spatial_normalization(settings, mod='T1w', name='SpatialNormalization',
         template_resolution=2,
         reference=mod[:2],
         generate_report=True,),
-                   name='SpatialNormalization',
-                   # Request all MultiProc processes when ants_nthreads > n_procs
-                   num_threads=min(settings.get('ants_nthreads', DEFAULTS['ants_nthreads']),
-                                   settings.get('n_procs', 1)),
-                   mem_gb=3)
-    norm.inputs.reference_mask = op.join(mni_template,
-                                     '%dmm_brainmask.nii.gz' % int(resolution))
+        name='SpatialNormalization',
+        # Request all MultiProc processes when ants_nthreads > n_procs
+        num_threads=min(settings.get('ants_nthreads', DEFAULTS['ants_nthreads']),
+                        settings.get('n_procs', 1)),
+        mem_gb=3)
+    norm.inputs.reference_mask = op.join(
+        mni_template, '%dmm_brainmask.nii.gz' % int(resolution))
 
     workflow.connect([
         (inputnode, norm, [('moving_image', 'moving_image'),
@@ -207,6 +208,7 @@ def spatial_normalization(settings, mod='T1w', name='SpatialNormalization',
                             ('out_report', 'out_report')]),
     ])
     return workflow
+
 
 def compute_iqms(settings, modality='T1w', name='ComputeIQMs'):
     """
@@ -230,7 +232,8 @@ def compute_iqms(settings, modality='T1w', name='ComputeIQMs'):
     outputnode = pe.Node(niu.IdentityInterface(fields=['out_file', 'out_noisefit']),
                          name='outputnode')
 
-    deriv_dir = check_folder(op.abspath(op.join(settings['output_dir'], 'derivatives')))
+#    deriv_dir = check_folder(op.abspath(op.join(settings['output_dir'], 'derivatives')))
+    deriv_dir = check_folder(op.abspath(settings['output_dir']))
 
     # Extract metadata
     meta = pe.Node(ReadSidecarJSON(), name='metadata')
@@ -311,110 +314,111 @@ def compute_iqms(settings, modality='T1w', name='ComputeIQMs'):
     return workflow
 
 
-def individual_reports(settings, name='ReportsWorkflow'):
-    """
-    Encapsulates nodes writing plots
+#def individual_reports(settings, name='ReportsWorkflow'):
+#    """
+#    Encapsulates nodes writing plots
+#
+#    .. workflow::
+#
+#        from mriqc.workflows.anatomical import individual_reports
+#        wf = individual_reports(settings={'output_dir': 'out'})
+#
+#    """
+#    from ..interfaces import PlotMosaic
+#    from ..reports import individual_html
+#
+#    verbose = settings.get('verbose_reports', False)
+#    pages = 2
+#    extra_pages = 0
+#    if verbose:
+#        extra_pages = 7
+#
+#    workflow = pe.Workflow(name=name)
+#    inputnode = pe.Node(niu.IdentityInterface(fields=[
+#        'in_ras', 'brainmask', 'headmask', 'airmask', 'artmask', 'rotmask',
+#        'segmentation', 'inu_corrected', 'noisefit', 'in_iqms',
+#        'mni_report']),
+#        name='inputnode')
+#
+#    mosaic_zoom = pe.Node(PlotMosaic(
+#        out_file='plot_anat_mosaic1_zoomed.svg',
+#        title='zoomed',
+#        cmap='Greys_r'), name='PlotMosaicZoomed')
+#
+#    mosaic_noise = pe.Node(PlotMosaic(
+#        out_file='plot_anat_mosaic2_noise.svg',
+#        title='noise enhanced',
+#        only_noise=True,
+#        cmap='viridis_r'), name='PlotMosaicNoise')
+#
+#    mplots = pe.Node(niu.Merge(pages + extra_pages), name='MergePlots')
+#    rnode = pe.Node(niu.Function(
+#        input_names=['in_iqms', 'in_plots'], output_names=['out_file'],
+#        function=individual_html), name='GenerateReport')
+#
+#    # Link images that should be reported
+#    dsplots = pe.Node(nio.DataSink(
+#        base_directory=settings['output_dir'], parameterization=False), name='dsplots')
+#    dsplots.inputs.container = 'reports'
+#
+#    workflow.connect([
+#        (inputnode, rnode, [('in_iqms', 'in_iqms')]),
+#        (inputnode, mosaic_zoom, [('in_ras', 'in_file'),
+#                                  ('brainmask', 'bbox_mask_file')]),
+#        (inputnode, mosaic_noise, [('in_ras', 'in_file')]),
+#        (mosaic_zoom, mplots, [('out_file', "in1")]),
+#        (mosaic_noise, mplots, [('out_file', "in2")]),
+#        (mplots, rnode, [('out', 'in_plots')]),
+#        (rnode, dsplots, [('out_file', "@html_report")]),
+#    ])
+#
+#    if not verbose:
+#        return workflow
+#
+#    from ..interfaces.viz import PlotContours
+#    from ..viz.utils import plot_bg_dist
+#    plot_bgdist = pe.Node(niu.Function(input_names=['in_file'], output_names=['out_file'],
+#                          function=plot_bg_dist), name='PlotBackground')
+#
+#    plot_segm = pe.Node(PlotContours(
+#        display_mode='z', levels=[.5, 1.5, 2.5], cut_coords=10,
+#        colors=['r', 'g', 'b']), name='PlotSegmentation')
+#
+#    plot_bmask = pe.Node(PlotContours(
+#        display_mode='z', levels=[.5], colors=['r'], cut_coords=10,
+#        out_file='bmask'), name='PlotBrainmask')
+#    plot_airmask = pe.Node(PlotContours(
+#        display_mode='x', levels=[.5], colors=['r'],
+#        cut_coords=6, out_file='airmask'), name='PlotAirmask')
+#    plot_headmask = pe.Node(PlotContours(
+#        display_mode='x', levels=[.5], colors=['r'],
+#        cut_coords=6, out_file='headmask'), name='PlotHeadmask')
+#    plot_artmask = pe.Node(PlotContours(
+#        display_mode='z', levels=[.5], colors=['r'], cut_coords=10,
+#        out_file='artmask', saturate=True), name='PlotArtmask')
+#
+#    workflow.connect([
+#        (inputnode, plot_segm, [('in_ras', 'in_file'),
+#                                ('segmentation', 'in_contours')]),
+#        (inputnode, plot_bmask, [('in_ras', 'in_file'),
+#                                 ('brainmask', 'in_contours')]),
+#        (inputnode, plot_headmask, [('in_ras', 'in_file'),
+#                                    ('headmask', 'in_contours')]),
+#        (inputnode, plot_airmask, [('in_ras', 'in_file'),
+#                                   ('airmask', 'in_contours')]),
+#        (inputnode, plot_artmask, [('in_ras', 'in_file'),
+#                                   ('artmask', 'in_contours')]),
+#        (inputnode, plot_bgdist, [('noisefit', 'in_file')]),
+#        (inputnode, mplots, [('mni_report', "in%d" % (pages + 1))]),
+#        (plot_bmask, mplots, [('out_file', 'in%d' % (pages + 2))]),
+#        (plot_segm, mplots, [('out_file', 'in%d' % (pages + 3))]),
+#        (plot_artmask, mplots, [('out_file', 'in%d' % (pages + 4))]),
+#        (plot_headmask, mplots, [('out_file', 'in%d' % (pages + 5))]),
+#        (plot_airmask, mplots, [('out_file', 'in%d' % (pages + 6))]),
+#        (plot_bgdist, mplots, [('out_file', 'in%d' % (pages + 7))])
+#    ])
+#    return workflow
 
-    .. workflow::
-
-        from mriqc.workflows.anatomical import individual_reports
-        wf = individual_reports(settings={'output_dir': 'out'})
-
-    """
-    from ..interfaces import PlotMosaic
-    from ..reports import individual_html
-
-    verbose = settings.get('verbose_reports', False)
-    pages = 2
-    extra_pages = 0
-    if verbose:
-        extra_pages = 7
-
-    workflow = pe.Workflow(name=name)
-    inputnode = pe.Node(niu.IdentityInterface(fields=[
-        'in_ras', 'brainmask', 'headmask', 'airmask', 'artmask', 'rotmask',
-        'segmentation', 'inu_corrected', 'noisefit', 'in_iqms',
-        'mni_report']),
-        name='inputnode')
-
-    mosaic_zoom = pe.Node(PlotMosaic(
-        out_file='plot_anat_mosaic1_zoomed.svg',
-        title='zoomed',
-        cmap='Greys_r'), name='PlotMosaicZoomed')
-
-    mosaic_noise = pe.Node(PlotMosaic(
-        out_file='plot_anat_mosaic2_noise.svg',
-        title='noise enhanced',
-        only_noise=True,
-        cmap='viridis_r'), name='PlotMosaicNoise')
-
-    mplots = pe.Node(niu.Merge(pages + extra_pages), name='MergePlots')
-    rnode = pe.Node(niu.Function(
-        input_names=['in_iqms', 'in_plots'], output_names=['out_file'],
-        function=individual_html), name='GenerateReport')
-
-    # Link images that should be reported
-    dsplots = pe.Node(nio.DataSink(
-        base_directory=settings['output_dir'], parameterization=False), name='dsplots')
-    dsplots.inputs.container = 'reports'
-
-    workflow.connect([
-        (inputnode, rnode, [('in_iqms', 'in_iqms')]),
-        (inputnode, mosaic_zoom, [('in_ras', 'in_file'),
-                                  ('brainmask', 'bbox_mask_file')]),
-        (inputnode, mosaic_noise, [('in_ras', 'in_file')]),
-        (mosaic_zoom, mplots, [('out_file', "in1")]),
-        (mosaic_noise, mplots, [('out_file', "in2")]),
-        (mplots, rnode, [('out', 'in_plots')]),
-        (rnode, dsplots, [('out_file', "@html_report")]),
-    ])
-
-    if not verbose:
-        return workflow
-
-    from ..interfaces.viz import PlotContours
-    from ..viz.utils import plot_bg_dist
-    plot_bgdist = pe.Node(niu.Function(input_names=['in_file'], output_names=['out_file'],
-                          function=plot_bg_dist), name='PlotBackground')
-
-    plot_segm = pe.Node(PlotContours(
-        display_mode='z', levels=[.5, 1.5, 2.5], cut_coords=10,
-        colors=['r', 'g', 'b']), name='PlotSegmentation')
-
-    plot_bmask = pe.Node(PlotContours(
-        display_mode='z', levels=[.5], colors=['r'], cut_coords=10,
-        out_file='bmask'), name='PlotBrainmask')
-    plot_airmask = pe.Node(PlotContours(
-        display_mode='x', levels=[.5], colors=['r'],
-        cut_coords=6, out_file='airmask'), name='PlotAirmask')
-    plot_headmask = pe.Node(PlotContours(
-        display_mode='x', levels=[.5], colors=['r'],
-        cut_coords=6, out_file='headmask'), name='PlotHeadmask')
-    plot_artmask = pe.Node(PlotContours(
-        display_mode='z', levels=[.5], colors=['r'], cut_coords=10,
-        out_file='artmask', saturate=True), name='PlotArtmask')
-
-    workflow.connect([
-        (inputnode, plot_segm, [('in_ras', 'in_file'),
-                                ('segmentation', 'in_contours')]),
-        (inputnode, plot_bmask, [('in_ras', 'in_file'),
-                                 ('brainmask', 'in_contours')]),
-        (inputnode, plot_headmask, [('in_ras', 'in_file'),
-                                    ('headmask', 'in_contours')]),
-        (inputnode, plot_airmask, [('in_ras', 'in_file'),
-                                   ('airmask', 'in_contours')]),
-        (inputnode, plot_artmask, [('in_ras', 'in_file'),
-                                   ('artmask', 'in_contours')]),
-        (inputnode, plot_bgdist, [('noisefit', 'in_file')]),
-        (inputnode, mplots, [('mni_report', "in%d" % (pages + 1))]),
-        (plot_bmask, mplots, [('out_file', 'in%d' % (pages + 2))]),
-        (plot_segm, mplots, [('out_file', 'in%d' % (pages + 3))]),
-        (plot_artmask, mplots, [('out_file', 'in%d' % (pages + 4))]),
-        (plot_headmask, mplots, [('out_file', 'in%d' % (pages + 5))]),
-        (plot_airmask, mplots, [('out_file', 'in%d' % (pages + 6))]),
-        (plot_bgdist, mplots, [('out_file', 'in%d' % (pages + 7))])
-    ])
-    return workflow
 
 def headmsk_wf(name='HeadMaskWorkflow', use_bet=True):
     """
@@ -429,7 +433,7 @@ def headmsk_wf(name='HeadMaskWorkflow', use_bet=True):
 
     has_dipy = False
     try:
-        from dipy.denoise import nlmeans
+        from dipy.denoise import nlmeans  # noqa
         has_dipy = True
     except ImportError:
         pass
@@ -456,10 +460,11 @@ def headmsk_wf(name='HeadMaskWorkflow', use_bet=True):
             function=_estimate_snr), name='EstimateSNR')
         denoise = pe.Node(Denoise(), name='Denoise')
         gradient = pe.Node(niu.Function(
-            input_names=['in_file', 'snr'], output_names=['out_file'], function=image_gradient), name='Grad')
+            input_names=['in_file', 'snr'], output_names=['out_file'],
+            function=image_gradient), name='Grad')
         thresh = pe.Node(niu.Function(
-            input_names=['in_file', 'in_segm'], output_names=['out_file'], function=gradient_threshold),
-                         name='GradientThreshold')
+            input_names=['in_file', 'in_segm'], output_names=['out_file'],
+            function=gradient_threshold), name='GradientThreshold')
 
         workflow.connect([
             (inputnode, estsnr, [('in_file', 'in_file'),
@@ -547,6 +552,7 @@ def _add_provenance(in_file, settings, air_msk, rot_msk):
 
     return out_prov
 
+
 def _binarize(in_file, threshold=0.5, out_file=None):
     import os.path as op
     import numpy as np
@@ -571,12 +577,14 @@ def _binarize(in_file, threshold=0.5, out_file=None):
         out_file)
     return out_file
 
+
 def _estimate_snr(in_file, seg_file):
     import nibabel as nb
     from mriqc.qc.anatomical import snr
     out_snr = snr(nb.load(in_file).get_data(), nb.load(seg_file).get_data(),
                   fglabel='wm')
     return out_snr
+
 
 def _enhance(in_file, out_file=None):
     import os.path as op
@@ -605,6 +613,7 @@ def _enhance(in_file, out_file=None):
 
     return out_file
 
+
 def image_gradient(in_file, snr, out_file=None):
     """Computes the magnitude gradient of an image using numpy"""
     import os.path as op
@@ -630,6 +639,7 @@ def image_gradient(in_file, snr, out_file=None):
 
     nb.Nifti1Image(grad, imnii.get_affine(), imnii.get_header()).to_filename(out_file)
     return out_file
+
 
 def gradient_threshold(in_file, in_segm, thresh=1.0, out_file=None):
     """ Compute a threshold from the histogram of the magnitude gradient image """
@@ -659,10 +669,10 @@ def gradient_threshold(in_file, in_segm, thresh=1.0, out_file=None):
 
     segdata = nb.load(in_segm).get_data().astype(np.uint8)
     segdata[segdata > 0] = 1
-    segdata = sim.binary_dilation(segdata, struc, iterations=2, border_value=1).astype(np.uint8)  # pylint: disable=no-member
+    segdata = sim.binary_dilation(
+        segdata, struc, iterations=2, border_value=1).astype(np.uint8)
     mask[segdata > 0] = 1
-
-    mask = sim.binary_closing(mask, struc, iterations=2).astype(np.uint8)  # pylint: disable=no-member
+    mask = sim.binary_closing(mask, struc, iterations=2).astype(np.uint8)
     # Remove small objects
     label_im, nb_labels = sim.label(mask)
     artmsk = np.zeros_like(mask)
