@@ -27,6 +27,7 @@ BIDS_EXPR = """\
 (_rec-(?P<rec_id>[a-zA-Z0-9]+))?(_run-(?P<run_id>[a-zA-Z0-9]+))?\
 """
 
+
 def split_ext(in_file, out_file=None):
     import os.path as op
     if out_file is None:
@@ -39,37 +40,6 @@ def split_ext(in_file, out_file=None):
         return split_ext(out_file)
 
 
-def reorient_and_discard_non_steady(in_file, float32=False):
-    import nibabel as nb
-    import os
-    import numpy as np
-    import nibabel as nb
-    from statsmodels.robust.scale import mad
-
-    _, outfile = os.path.split(in_file)
-
-    nii = nb.as_closest_canonical(nb.load(in_file))
-    in_data = nii.get_data()
-
-    # downcast to reduce space consumption and improve performance
-    if float32 and np.dtype(in_data.dtype).itemsize > 4:
-        in_data = in_data.astype(np.float32)
-
-    data = in_data[:, :, :, :50]
-    timeseries = data.max(axis=0).max(axis=0).max(axis=0)
-    outlier_timecourse = (timeseries - np.median(timeseries)) / mad(
-        timeseries)
-    exclude_index = 0
-    for i in range(10):
-        if outlier_timecourse[i] > 10:
-            exclude_index += 1
-        else:
-            break
-
-    nb.Nifti1Image(in_data[:, :, :, exclude_index:], nii.affine, nii.header).to_filename(outfile)
-    nii.uncache()
-    return exclude_index, os.path.abspath(outfile)
-
 def check_folder(folder):
     if not op.exists(folder):
         try:
@@ -78,6 +48,7 @@ def check_folder(folder):
             if not exc.errno == EEXIST:
                 raise
     return folder
+
 
 def reorder_csv(csv_file, out_file=None):
     """
@@ -130,7 +101,7 @@ def rotate_files(fname):
     prev.insert(0, fname)
     prev.append('{0}.{1:d}{2}'.format(name, len(prev) - 1, ext))
     for i in reversed(list(range(1, len(prev)))):
-        os.rename(prev[i-1], prev[i])
+        os.rename(prev[i - 1], prev[i])
 
 
 def bids_path(subid, sesid=None, runid=None, prefix=None, out_path=None, ext='json'):
@@ -194,16 +165,13 @@ def generate_pred(derivatives_dir, output_dir, mod):
     return out_csv
 
 
-def generate_csv(derivatives_dir, output_dir, mod):
+def generate_csv(output_dir, mod):
     """
     Generates a csv file from all json files in the derivatives directory
     """
 
     # If some were found, generate the CSV file and group report
-    out_csv = op.join(output_dir, mod + '.csv')
-    jsonfiles = glob(op.join(derivatives_dir, 'sub-*_%s.json' % mod))
-    if not jsonfiles:
-        return None, out_csv
+    jsonfiles = glob(op.join(output_dir, 'sub-*_%s.json' % mod))
 
     datalist = []
     comps = set(list(BIDS_COMP.keys()))
@@ -229,21 +197,18 @@ def generate_csv(derivatives_dir, output_dir, mod):
     try:
         dataframe = dataframe.sort_values(by=bids_fields)
     except AttributeError:
-        #pylint: disable=E1101
         dataframe = dataframe.sort(columns=bids_fields)
 
     # Drop duplicates
     try:
-        #pylint: disable=E1101
         dataframe.drop_duplicates(bids_fields, keep='last', inplace=True)
     except TypeError:
-        #pylint: disable=E1101
         dataframe.drop_duplicates(['subject_id', 'session_id', 'run_id'], take_last=True,
                                   inplace=True)
 
     ordercols = bids_fields + sorted(list(set(cols) - set(bids_fields)))
-    dataframe[ordercols].to_csv(out_csv, index=False)
-    return dataframe, out_csv
+
+    return dataframe[ordercols], ordercols
 
 
 def _read_and_save(in_file):
