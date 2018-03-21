@@ -19,6 +19,7 @@ from ..classifier.helper import CVHelper
 from ..utils.misc import generate_csv  # , generate_pred
 from collections import OrderedDict
 import json
+import codecs
 
 
 from .. import __version__
@@ -354,15 +355,16 @@ def main():
 
 
         for mod in modalities:
-            print(mod)
-            dataframe, order = generate_csv(settings['output_dir'], mod)
+            dataframe, order, jsonfiles = generate_csv(settings['output_dir'], mod)
 
             # If there are no iqm.json files, nothing to do.
             if dataframe is None:
                 log.warning(
                     'No IQM-JSON files were found for the %s data type in %s. The group-level '
-                    'report was not generated.', mod, derivatives_dir)
+                    'report was not generated.', mod, settings['output_dir'])
                 continue
+
+            if 'jsonfile' in order: order.remove('jsonfile')
 
             base_name = 'mclf_run-20170724-191452_mod-rfc_ver-0.9.7-rc8_class-2_cv-loso'
             load_classifier = pkgrf(
@@ -374,14 +376,19 @@ def main():
                                 rate_label=['rater_1'], basename=base_name)
             
             prediction = cvhelper.predict(dataframe[order])
-            y_prob = prediction[0][0][1]
-            y_pred = prediction[1][0]
-           
-            with open('sub-park_T1w.json', 'r+') as json_file:
-                json_dict = json.load(json_file, object_pairs_hook=OrderedDict)
-                json_dict['y_prob'] = y_prob
-                json_dict['y_pred'] = y_pred
-                json.dump(json_dict, json_file)
+            dataframe['y_prob'] = prediction[0][:,1]
+            dataframe['y_pred'] = prediction[1]
+
+            dataframe.index = jsonfiles
+
+            for jsonfile in dataframe.index.values:
+                with open(jsonfile, 'r+') as json_file:
+                    json_dict = json.load(json_file, object_pairs_hook=OrderedDict)
+                    json_dict['y_prob'] = float(dataframe.get_value(jsonfile, 'y_prob'))
+                    json_dict['y_pred'] = float(dataframe.get_value(jsonfile, 'y_pred'))
+                    json_file.seek(0)
+                    json.dump(json_dict, json_file, separators=(',', ':'), sort_keys=True, indent=4)
+                    json_file.truncate()
 
 
 """
